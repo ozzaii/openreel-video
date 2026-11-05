@@ -3,7 +3,6 @@ import type {
   DecodeResponse,
   WorkerResponse,
 } from "./decode-worker";
-import { createDecodeWorkerUrl } from "./decode-worker";
 
 export interface FrameDecodeRequest {
   clipId: string;
@@ -97,10 +96,9 @@ export class ParallelFrameDecoder {
 
   private async createWorker(index: number): Promise<WorkerState> {
     return new Promise((resolve, reject) => {
-      const workerUrl = createDecodeWorkerUrl();
-      this.workerUrls.push(workerUrl);
-
-      const worker = new Worker(workerUrl, { type: "module" });
+      // A Vite module worker of decode-worker.ts: mediabunny comes bundled with it. The Blob-URL copy of its
+      // code could not resolve the bare "mediabunny" import and fell back to esm.sh.
+      const worker = new Worker(new URL("./decode-worker.ts", import.meta.url), { type: "module" });
 
       const state: WorkerState = {
         worker,

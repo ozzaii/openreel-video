@@ -1,6 +1,8 @@
 import type { ExportProgress } from "../export/types";
 
-const FFMPEG_CORE_BASE_URL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm";
+// The pinned core (0.12.6) is emitted with the bundle and served from this origin: no CDN at load time.
+import ffmpegCoreURL from "@ffmpeg/core?url";
+import ffmpegWasmURL from "@ffmpeg/core/wasm?url";
 type FFmpegInstance = {
   load(options?: {
     coreURL?: string;
@@ -147,10 +149,10 @@ export class FFmpegFallback {
       checkAborted();
       instance = new FFmpeg() as unknown as FFmpegInstance;
       this.ffmpeg = instance;
-      const download = async (filename: string, mime: string): Promise<string> => {
+      const download = async (source: string, mime: string): Promise<string> => {
         try {
-          const response = await fetch(`${FFMPEG_CORE_BASE_URL}/${filename}`, { signal: controller.signal });
-          if (!response.ok) throw new Error(`FFmpeg download failed (${response.status}): ${filename}`);
+          const response = await fetch(source, { signal: controller.signal });
+          if (!response.ok) throw new Error(`FFmpeg download failed (${response.status}): ${source}`);
           const bytes = await response.arrayBuffer();
           checkAborted();
           const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
@@ -167,8 +169,8 @@ export class FFmpegFallback {
       // Wait for both tasks to settle so no late download can create a URL
       // after cleanup; a failed download aborts its sibling request.
       const downloads = await Promise.allSettled([
-        download("ffmpeg-core.js", "text/javascript"),
-        download("ffmpeg-core.wasm", "application/wasm"),
+        download(ffmpegCoreURL, "text/javascript"),
+        download(ffmpegWasmURL, "application/wasm"),
       ]);
       if (downloadFailure) throw downloadFailure;
       checkAborted();

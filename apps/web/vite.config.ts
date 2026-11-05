@@ -15,14 +15,7 @@ function desktopHtmlPlugin() {
         .replace(/href="\/favicon\.svg"/g, 'href="./favicon.svg"')
         .replace(/href="\/manifest\.json"/g, 'href="./manifest.json"')
         .replace(/href="\/icons\/icon-192\.png"/g, 'href="./icons/icon-192.png"');
-      out = out.replace(
-        /<link rel="preconnect"[^>]*>\s*/g,
-        "",
-      );
-      out = out.replace(
-        /<link href="https:\/\/fonts\.googleapis\.com[^>]*>\s*/g,
-        '<link href="./fonts/google-fonts.css" rel="stylesheet" />',
-      );
+      out = out.replace(/href="\/fonts\/google-fonts\.css"/g, 'href="./fonts/google-fonts.css"');
       return out;
     },
   };

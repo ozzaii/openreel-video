@@ -1,38 +1,11 @@
 import type { Project, MotionComposition } from "@openreel/core";
-import { GOOGLE_FONT_SPECS } from "./font-catalog";
 
-const initialFamilies = new Set(["Geist", "Geist Mono", "Inter"]);
-const pendingStylesheets = new Map<string, Promise<void>>();
 export interface ProjectFont { family: string; weight: string; sample: string }
 
-function loadStylesheet(family: string): Promise<void> {
-  const spec = GOOGLE_FONT_SPECS[family];
-  if (!spec || initialFamilies.has(family) || window.openreel?.platform === "desktop") return Promise.resolve();
-  const pending = pendingStylesheets.get(family);
-  if (pending) return pending;
-  const promise = new Promise<void>((resolve, reject) => {
-    const link = document.createElement("link");
-    link.rel = "stylesheet";
-    link.dataset.openreelFont = family;
-    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(spec).replace(/%20/g, "+")}&display=swap`;
-    const finish = (error?: Error) => {
-      clearTimeout(timeout);
-      link.onload = null; link.onerror = null;
-      if (error) { link.remove(); pendingStylesheets.delete(family); reject(error); }
-      else resolve();
-    };
-    const timeout = setTimeout(() => finish(new Error(`Could not load ${family}. Check your connection or choose a system font.`)), 10_000);
-    link.onload = () => finish();
-    link.onerror = () => finish(new Error(`Could not load ${family}. Check your connection or choose a system font.`));
-    document.head.appendChild(link);
-  });
-  pendingStylesheets.set(family, promise);
-  return promise;
-}
-
+// Every catalog family ships with the page: public/fonts/google-fonts.css (the OFL set the desktop build vendored),
+// linked by index.html, so a family's woff2 comes from this origin the first time a glyph needs it. No CDN.
 export async function ensureFontFamily(family: string, weight: string | number = 400, sample = "OpenReel"): Promise<void> {
   if (typeof document === "undefined" || !document.fonts || !family) return;
-  await loadStylesheet(family);
   const fontWeight = typeof weight === "number" || /^\d+$/.test(weight) ? String(weight) : weight === "bold" ? "700" : "400";
   await document.fonts.load(`${fontWeight} 48px ${JSON.stringify(family)}`, sample || "OpenReel");
 }
