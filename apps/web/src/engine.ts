@@ -1,6 +1,6 @@
 // Engine boot mode (#engine=<project key>): the editor without its screens, driven by a host
 // through OpenReel's own tool dispatcher — the one the desktop MCP bridge forwards to.
-import type { ToolResult } from "@openreel/agent";
+import { buildSystemPrompt, selectToolsForPrompt, toAnthropicTools, type ToolResult } from "@openreel/agent";
 import { createProjectSerializer, createStorageEngine } from "@openreel/core";
 import { handleMcpBridgeRequest, type McpBridgeRequest } from "./services/agent/mcp-listener";
 import { getLiveEditorHost } from "./services/agent/host-singleton";
@@ -12,6 +12,8 @@ import { useProjectStore } from "./stores/project-store";
 export interface Engine {
   readonly ready: Promise<void>;
   tools(): Promise<Array<{ name: string; description: string; inputSchema: unknown }>>;
+  /** Their agent's own turn setup for a brief: the router's subset, the system prompt over it, its schemas. */
+  prompt(brief: string): Promise<{ system: string; tools: ReturnType<typeof toAnthropicTools> }>;
   call(name: string, args?: Record<string, unknown>): Promise<ToolResult>;
   save(): Promise<string>;
   load(json: string): Promise<void>;
@@ -45,6 +47,11 @@ export function installEngine(): void {
   window.engine = {
     ready: useEngineStore.getState().initialize(),
     tools: async () => (await dispatch({ kind: "listTools" })) as Awaited<ReturnType<Engine["tools"]>>,
+    // As packages/agent-runner/src/run.ts sets up a headless turn, against the live editor.
+    prompt: async (brief) => {
+      const names = selectToolsForPrompt(brief);
+      return { system: buildSystemPrompt(getLiveEditorHost(), names), tools: toAnthropicTools(names) };
+    },
     call: async (name, args = {}) => (await dispatch({ kind: "callTool", name, args })) as ToolResult,
     save: async () => serializer().exportToJson(useProjectStore.getState().getFullProject()),
     load: async (json) => {
