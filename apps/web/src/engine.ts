@@ -1,9 +1,12 @@
 // Engine boot mode (#engine=<project key>): the editor without its screens, driven by a host
-// through OpenReel's own tool dispatcher — the one the desktop MCP bridge forwards to.
-import { buildSystemPrompt, selectToolsForPrompt, toAnthropicTools, type ToolResult } from "@openreel/agent";
+// through OpenReel's own dispatchers: their current chat's curated catalog (editing-tools.ts, on an
+// atomic EditingSession per call) and, past it, the registry the desktop MCP bridge forwards to.
+import { toAnthropicTools, type ToolResult } from "@openreel/agent";
 import { createProjectSerializer, createStorageEngine } from "@openreel/core";
 import { handleMcpBridgeRequest, type McpBridgeRequest } from "./services/agent/mcp-listener";
-import { getLiveEditorHost } from "./services/agent/host-singleton";
+import { getLiveEditorHost, runExclusive } from "./services/agent/host-singleton";
+import { EditingSession } from "./services/agent/editing-session";
+import { EDIT_TOOL_SCHEMAS, EDITING_SYSTEM, editingToolDefs, executeEditingTool } from "./services/agent/editing-tools";
 import { createExportJobRunner, getLastExport } from "./services/agent/export-job-runner";
 import { fetchInPage } from "./services/agent/live-host";
 import { useEngineStore } from "./stores/engine-store";
@@ -12,8 +15,8 @@ import { useProjectStore } from "./stores/project-store";
 export interface Engine {
   readonly ready: Promise<void>;
   tools(): Promise<Array<{ name: string; description: string; inputSchema: unknown }>>;
-  /** Their agent's own turn setup for a brief: the router's subset, the system prompt over it, its schemas. */
-  prompt(brief: string): Promise<{ system: string; tools: ReturnType<typeof toAnthropicTools> }>;
+  /** What their current chat sends a model: its system prompt and tools, plus what a host off the turn needs. */
+  catalog(): Promise<{ system: string; tools: unknown[] }>;
   call(name: string, args?: Record<string, unknown>): Promise<ToolResult>;
   save(): Promise<string>;
   load(json: string): Promise<void>;
@@ -33,6 +36,27 @@ async function dispatch(req: Omit<McpBridgeRequest, "callId">): Promise<unknown>
   return res.result;
 }
 
+/**
+ * Past their chat's catalog, from the registry: media by link and a real export (the chat only opens
+ * the export dialog and imports by hand), and an SRT in one call (the chat adds a subtitle at a time).
+ */
+const FROM_REGISTRY = ["import_media_from_url", "export_video", "import_srt"];
+
+export function catalog(): { system: string; tools: unknown[] } {
+  const chat = (editingToolDefs("anthropic") as Array<{ name: string }>).filter((t) => t.name !== "open_export");
+  return { system: EDITING_SYSTEM, tools: [...chat, ...toAnthropicTools(FROM_REGISTRY)] };
+}
+
+/** One catalog call as their chat runs a turn (chat-store.ts): validated on a draft, committed whole or not at all. */
+export async function edit(name: string, args: Record<string, unknown>): Promise<ToolResult> {
+  const session = new EditingSession();
+  const txn = session.beginTransaction();
+  const result = await executeEditingTool(name, args, session);
+  if (result.ok) await session.commitTransaction(txn, `AI edit: ${name}`);
+  else await session.rollbackTransaction();
+  return result;
+}
+
 const serializer = () => createProjectSerializer(createStorageEngine());
 
 function exportedBlob(id?: string): { id: string; blob: Blob } {
@@ -45,14 +69,19 @@ function exportedBlob(id?: string): { id: string; blob: Blob } {
 export function installEngine(): void {
   getLiveEditorHost().setJobRunner(createExportJobRunner());
   window.engine = {
-    ready: useEngineStore.getState().initialize(),
+    // A conversation's video is open from the start, as the editor is when their chat runs; load() replaces it.
+    ready: useEngineStore
+      .getState()
+      .initialize()
+      .then(() => {
+        if (!useProjectStore.getState().hasOpenProject) useProjectStore.getState().createNewProject("video");
+      }),
     tools: async () => (await dispatch({ kind: "listTools" })) as Awaited<ReturnType<Engine["tools"]>>,
-    // As packages/agent-runner/src/run.ts sets up a headless turn, against the live editor.
-    prompt: async (brief) => {
-      const names = selectToolsForPrompt(brief);
-      return { system: buildSystemPrompt(getLiveEditorHost(), names), tools: toAnthropicTools(names) };
-    },
-    call: async (name, args = {}) => (await dispatch({ kind: "callTool", name, args })) as ToolResult,
+    catalog: async () => catalog(),
+    call: async (name, args = {}) =>
+      name in EDIT_TOOL_SCHEMAS
+        ? runExclusive(() => edit(name, args))
+        : ((await dispatch({ kind: "callTool", name, args })) as ToolResult),
     save: async () => serializer().exportToJson(useProjectStore.getState().getFullProject()),
     load: async (json) => {
       const project = serializer().importFromJson(json);
