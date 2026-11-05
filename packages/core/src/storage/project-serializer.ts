@@ -260,7 +260,7 @@ export class ProjectSerializer {
           return {
             ...item,
             isPlaceholder: true,
-            originalUrl: item.thumbnailUrl || undefined,
+            originalUrl: item.originalUrl || item.thumbnailUrl || undefined,
           };
         }
         return item;

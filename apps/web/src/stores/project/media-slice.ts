@@ -22,7 +22,7 @@ export function createMediaSlice(set: Set, get: Get): MediaSlice {
   const replacementRequests = new Map<string, symbol>();
 
   return {
-    importMedia: async (file: File) => {
+    importMedia: async (file: File, originalUrl?: string) => {
       const { project } = get();
 
       try {
@@ -140,6 +140,7 @@ export function createMediaSlice(set: Set, get: Get): MediaSlice {
             size: file.size,
             lastModified: file.lastModified,
           },
+          ...(originalUrl ? { originalUrl } : {}),
         };
 
         const currentProject = get().project;
@@ -366,6 +367,7 @@ export function createMediaSlice(set: Set, get: Get): MediaSlice {
           filmstripThumbnails:
             filmstripThumbnails.length > 0 ? filmstripThumbnails : undefined,
           isPlaceholder: false,
+          originalUrl: project.mediaLibrary.items.find((item) => item.id === mediaId)?.originalUrl,
           sourceFile: {
             name: file.name,
             size: file.size,

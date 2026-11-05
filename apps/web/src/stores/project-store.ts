@@ -161,7 +161,7 @@ export interface ProjectState {
   ) => Promise<ActionResult>;
 
   // Media library actions
-  importMedia: (file: File) => Promise<ActionResult>;
+  importMedia: (file: File, originalUrl?: string) => Promise<ActionResult>;
   deleteMedia: (mediaId: string) => Promise<ActionResult>;
   replaceMediaAsset: (mediaId: string, file: File, sourceFolder?: string) => Promise<ActionResult>;
   renameMedia: (mediaId: string, name: string) => Promise<ActionResult>;

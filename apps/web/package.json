@@ -31,7 +31,6 @@
     "gsap": "^3.14.2",
     "idb-keyval": "^6.2.2",
     "lucide-react": "^0.555.0",
-    "posthog-js": "^1.335.2",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",

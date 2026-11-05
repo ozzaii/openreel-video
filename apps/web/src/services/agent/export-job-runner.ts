@@ -142,6 +142,13 @@ function nativeBackendFactory() {
   );
 }
 
+let lastExport: { id: string; blob: Blob } | null = null;
+
+/** The last export kept in memory by the web path of saveExportLocally. */
+export function getLastExport(): { id: string; blob: Blob } | null {
+  return lastExport;
+}
+
 async function saveExportLocally(
   blob: Blob,
   projectName: string | undefined,
@@ -149,8 +156,15 @@ async function saveExportLocally(
   contentType: string,
 ): Promise<JobResult> {
   const bridge = window.openreel?.fs;
-  if (!bridge) return { ok: false, error: "Local export storage is unavailable" };
   const filename = `${sanitizeName(projectName)}-${Date.now()}.${ext}`;
+  if (!bridge) {
+    // Web: the page keeps the Blob; its host reads it back (window.engine.exported / chunk).
+    lastExport = { id: filename, blob };
+    return {
+      ok: true,
+      data: { id: filename, filename, bytes: blob.size, format: ext, contentType, storage: "memory" },
+    };
+  }
   const path = await bridge.tempFilePath(ext);
   const handleId = await bridge.openWrite(path);
   const reader = blob.stream().getReader();

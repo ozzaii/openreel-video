@@ -342,6 +342,32 @@ describe("ProjectSerializer round-trip", () => {
 
     expect(imported.motionCompositions![0].audioClips).toEqual([]);
   });
+
+  it("keeps a media item's originalUrl so a loaded project can refetch it", () => {
+    const serializer = new ProjectSerializer(new MemoryStorageEngine());
+    const project = makeProject({
+      mediaLibrary: {
+        items: [
+          {
+            id: "m1",
+            name: "clip.mp4",
+            type: "video",
+            fileHandle: null,
+            blob: new Blob(["x"]),
+            metadata: { duration: 1, width: 1, height: 1, frameRate: 30, codec: "", sampleRate: 0, channels: 0, fileSize: 1 },
+            thumbnailUrl: "data:image/jpeg;base64,AA",
+            waveformData: null,
+            originalUrl: "https://studio.example/api/files/clip.mp4?sig=1",
+          },
+        ],
+      },
+    });
+
+    const [item] = serializer.importFromJson(serializer.exportToJson(project)).mediaLibrary.items;
+
+    expect(item.isPlaceholder).toBe(true);
+    expect(item.originalUrl).toBe("https://studio.example/api/files/clip.mp4?sig=1");
+  });
 });
 
 const makeShaderDef = (

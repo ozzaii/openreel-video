@@ -31,10 +31,17 @@ if (isDesktop) {
   );
 }
 
-registerServiceWorker().then((registration) => {
-  if (registration) {
-  }
-});
+// Engine boot mode: a host drives the editor through window.engine; no screens, no service worker.
+const isEngine = !isDesktop && window.location.hash.startsWith("#engine=");
+
+if (isEngine) {
+  void import("./engine").then((module) => module.installEngine());
+} else {
+  registerServiceWorker().then((registration) => {
+    if (registration) {
+    }
+  });
+}
 
 void initCustomFonts();
 
@@ -56,4 +63,4 @@ async function renderApplication(): Promise<void> {
   );
 }
 
-void renderApplication();
+if (!isEngine) void renderApplication();

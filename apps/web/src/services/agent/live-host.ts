@@ -94,6 +94,32 @@ function inferName(url: string, mime: string): string {
   return `media-${Date.now()}.${ext}`;
 }
 
+export async function fetchInPage(url: string): Promise<{
+  ok: boolean;
+  status: number;
+  contentType: string;
+  body: ArrayBuffer;
+  error?: string;
+}> {
+  try {
+    const res = await fetch(url);
+    return {
+      ok: res.ok,
+      status: res.status,
+      contentType: res.headers.get("content-type") ?? "",
+      body: res.ok ? await res.arrayBuffer() : new ArrayBuffer(0),
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 0,
+      contentType: "",
+      body: new ArrayBuffer(0),
+      error: `Download failed: ${error instanceof Error ? error.message : String(error)}`,
+    };
+  }
+}
+
 function projectRef(project: Project): ProjectRef {
   return {
     id: project.id,
@@ -251,17 +277,15 @@ export class LiveEditorHost implements EditingHost {
   ): Promise<ImportedMediaRef> {
     this.requireOpenProject();
     const bridge = window.openreel?.media?.fetchUrl;
-    if (typeof bridge !== "function") {
-      throw new Error("Media download is only available in the desktop app");
-    }
-    const res = await bridge({ url });
+    // Off desktop the page fetches the link itself; under COEP the link must send CORS + CORP.
+    const res = typeof bridge === "function" ? await bridge({ url }) : await fetchInPage(url);
     if (!res.ok) {
       throw new Error(res.error ?? `Download failed: HTTP ${res.status}`);
     }
     const mime = (res.contentType.split(";")[0] ?? "").trim() || MIME_BY_EXT[extFromUrl(url)] || "application/octet-stream";
     const name = options?.name ?? inferName(url, mime);
     const file = new File([res.body], name, { type: mime });
-    const result = await useProjectStore.getState().importMedia(file);
+    const result = await useProjectStore.getState().importMedia(file, url);
     if (!result.success || !result.actionId) {
       throw new Error(result.error?.message ?? "Media import failed");
     }
