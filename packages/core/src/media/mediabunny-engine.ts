@@ -67,6 +67,9 @@ type MediaBunnyInput = {
   [Symbol.dispose]?: () => void;
 };
 
+/** Past this gap a seek beats decoding through: above a usual keyframe distance, so a seek lands ahead of where it was. */
+const FORWARD_SEEK_SECONDS = 5;
+
 export class ExportFrameDecoder {
   private input: MediaBunnyInput | null = null;
   private sink: InstanceType<typeof import("mediabunny").CanvasSink> | null = null;
@@ -138,7 +141,17 @@ export class ExportFrameDecoder {
     // Start a new sequential decode for the first request or whenever the
     // timeline moves backwards (reverse playback, a loop, or a later clip
     // reusing the same media from an earlier in-point).
-    if (!this.canvasIterator || (this.currentFrame && timestamp < this.currentFrame.timestamp - 1e-8)) {
+    //
+    // A far jump forward seeks too: walking there decodes every frame between
+    // two cuts. Measured on a 734 s 720p source, 2 cores: a cut 345 s later held
+    // one frame past the export's 30 s limit, and the walks were most of a
+    // 23 s export's 190 s.
+    if (
+      !this.canvasIterator ||
+      (this.currentFrame &&
+        (timestamp < this.currentFrame.timestamp - 1e-8 ||
+          timestamp > this.currentFrame.timestamp + FORWARD_SEEK_SECONDS))
+    ) {
       await this.resetCanvasIterator(timestamp);
     }
 

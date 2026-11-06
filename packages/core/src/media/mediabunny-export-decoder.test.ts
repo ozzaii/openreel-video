@@ -138,4 +138,60 @@ describe("ExportFrameDecoder", () => {
     expect(canvases).toHaveBeenNthCalledWith(1, 1.5);
     expect(canvases).toHaveBeenNthCalledWith(2, 0.25);
   });
+
+  it("seeks instead of decoding through a far jump forward, and only then", async () => {
+    class MockOffscreenCanvas {
+      width: number;
+      height: number;
+
+      constructor(width: number, height: number) {
+        this.width = width;
+        this.height = height;
+      }
+
+      getContext() {
+        return { clearRect: vi.fn(), drawImage: vi.fn() };
+      }
+    }
+    vi.stubGlobal("OffscreenCanvas", MockOffscreenCanvas);
+
+    const frames = [0, 1, 2, 3, 4, 100, 101].map((timestamp) => ({
+      canvas: new MockOffscreenCanvas(640, 360),
+      timestamp,
+      duration: 1,
+    }));
+    const canvases = vi.fn((startTimestamp: number) => {
+      const startIndex = findFrameAtOrBefore(frames, startTimestamp);
+      return (async function* () {
+        for (const frame of frames.slice(startIndex)) yield frame;
+      })();
+    });
+    class MockCanvasSink {
+      canvases = canvases;
+    }
+    class MockInput {
+      async getPrimaryVideoTrack() {
+        return {
+          displayWidth: 640,
+          displayHeight: 360,
+          canDecode: vi.fn().mockResolvedValue(true),
+        };
+      }
+    }
+    const decoder = new ExportFrameDecoder(
+      { Input: MockInput, ALL_FORMATS: [], BlobSource: class {}, CanvasSink: MockCanvasSink } as unknown as typeof import("mediabunny"),
+      new Blob(["video"]),
+      640,
+    );
+
+    expect(await decoder.initialize()).toBe(true);
+    await decoder.getFrame(0);
+    await decoder.getFrame(4); // a near step: the same walk
+    expect(canvases).toHaveBeenCalledTimes(1);
+    await decoder.getFrame(100); // a far cut: a seek
+    expect(canvases).toHaveBeenCalledTimes(2);
+    expect(canvases).toHaveBeenLastCalledWith(100);
+    await decoder.getFrame(101);
+    expect(canvases).toHaveBeenCalledTimes(2);
+  });
 });
