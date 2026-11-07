@@ -11,6 +11,8 @@ import { createExportJobRunner, getLastExport } from "./services/agent/export-jo
 import { fetchInPage } from "./services/agent/live-host";
 import { useEngineStore } from "./stores/engine-store";
 import { useProjectStore } from "./stores/project-store";
+import { ensureProjectFonts } from "./services/project-fonts";
+import { FONT_CATEGORIES } from "./components/editor/inspector/font-options";
 
 export interface Engine {
   readonly ready: Promise<void>;
@@ -46,7 +48,9 @@ const FROM_REGISTRY = ["import_media_from_url", "export_video", "import_srt"];
 
 export function catalog(): { system: string; tools: unknown[] } {
   const chat = (editingToolDefs("anthropic") as Array<{ name: string }>).filter((t) => t.name !== "open_export");
-  return { system: EDITING_SYSTEM, tools: [...chat, ...toAnthropicTools(FROM_REGISTRY)] };
+  // The families the page itself holds (public/fonts): a text clip's fontFamily is one of these, or it falls back.
+  const fonts = [...new Set(Object.values(FONT_CATEGORIES).flat())].join(", ");
+  return { system: `${EDITING_SYSTEM}\n\nFonts this editor holds: ${fonts}.`, tools: [...chat, ...toAnthropicTools(FROM_REGISTRY)] };
 }
 
 /** One catalog call as their chat runs a turn (chat-store.ts): validated on a draft, committed whole or not at all. */
@@ -101,9 +105,10 @@ export function installEngine(): void {
       }
     },
     frames: async (times, long = 480) => {
-      const project = useProjectStore.getState().getFullProject();
+      const { project } = useProjectStore.getState();
       const video = useEngineStore.getState().getVideoEngine();
       if (!video) throw new Error("The video engine is not ready");
+      await ensureProjectFonts(project);
       const { width, height } = project.settings;
       const scale = long / Math.max(width, height);
       const w = Math.round(width * scale);

@@ -8,6 +8,7 @@ import type {
 import type { Project } from "@openreel/core/types/project";
 import { getExportEngine, setEncoderBackendFactory, WebCodecsBackend } from "@openreel/core";
 import { useProjectStore } from "../../stores/project-store";
+import { ensureProjectFonts } from "../project-fonts";
 import { NativeFFmpegBackend } from "../native-ffmpeg-backend";
 import { renderMotionCompositionFrameToDataUrl } from "../../motion/export-motion-frame";
 
@@ -216,6 +217,8 @@ export function createExportJobRunner(): JobRunner {
         );
         const sink = createMemoryWritable();
         let result: ExportResult;
+        // As their export dialog does (export-runner.ts): without it a text clip's family is a fallback in the file.
+        await ensureProjectFonts(project);
         try {
           result = await drainExport(engine.exportVideo(project, settings, sink.writable));
         } finally {
