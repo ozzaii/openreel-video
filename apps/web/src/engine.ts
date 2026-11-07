@@ -22,8 +22,6 @@ export interface Engine {
   call(name: string, args?: Record<string, unknown>): Promise<ToolResult>;
   save(): Promise<string>;
   load(json: string): Promise<void>;
-  /** The timeline as it would export, at each second, tiled into one JPEG with its time on it: base64. */
-  frames(times: number[], long?: number): Promise<{ jpeg: string; columns: number; rows: number }>;
   exported(): Promise<{ id: string; bytes: number; type: string }>;
   chunk(id: string, start: number, size: number): Promise<string>;
 }
@@ -72,6 +70,39 @@ function exportedBlob(id?: string): { id: string; blob: Blob } {
   return last;
 }
 
+/** The timeline as it would export, at each second, tiled into one JPEG with its time on it. Through `call`: a host's method list stays as it is. */
+async function seeFrames({ times, long = 480 }: { times: number[]; long?: number }): Promise<ToolResult> {
+  const { project } = useProjectStore.getState();
+  const video = useEngineStore.getState().getVideoEngine();
+  if (!video) throw new Error("The video engine is not ready");
+  await ensureProjectFonts(project);
+  const { width, height } = project.settings;
+  const scale = long / Math.max(width, height);
+  const w = Math.round(width * scale);
+  const h = Math.round(height * scale);
+  const columns = Math.min(times.length, Math.ceil(Math.sqrt(times.length * (height >= width ? 2 : 1))));
+  const rows = Math.ceil(times.length / columns);
+  const sheet = new OffscreenCanvas(columns * w, rows * h);
+  const ctx = sheet.getContext("2d")!;
+  for (const [at, time] of times.entries()) {
+    const { image } = await video.renderFrame(project, time, w, h);
+    const x = (at % columns) * w;
+    const y = Math.floor(at / columns) * h;
+    ctx.drawImage(image, x, y, w, h);
+    image.close();
+    ctx.font = "bold 16px sans-serif";
+    const label = `${time.toFixed(2)} s`;
+    ctx.fillStyle = "#000";
+    ctx.fillRect(x, y, ctx.measureText(label).width + 8, 22);
+    ctx.fillStyle = "#fff";
+    ctx.fillText(label, x + 4, y + 16);
+  }
+  const bytes = new Uint8Array(await (await sheet.convertToBlob({ type: "image/jpeg", quality: 0.85 })).arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return { ok: true, summary: `${columns}x${rows} frames`, data: { jpeg: btoa(binary), columns, rows } };
+}
+
 export function installEngine(): void {
   getLiveEditorHost().setJobRunner(createExportJobRunner());
   window.engine = {
@@ -85,7 +116,9 @@ export function installEngine(): void {
     tools: async () => (await dispatch({ kind: "listTools" })) as Awaited<ReturnType<Engine["tools"]>>,
     catalog: async () => catalog(),
     call: async (name, args = {}) =>
-      name in EDIT_TOOL_SCHEMAS
+      name === "see_frames"
+        ? seeFrames(args as { times: number[]; long?: number })
+        : name in EDIT_TOOL_SCHEMAS
         ? runExclusive(() => edit(name, args))
         : ((await dispatch({ kind: "callTool", name, args })) as ToolResult),
     save: async () => serializer().exportToJson(useProjectStore.getState().getFullProject()),
@@ -103,37 +136,6 @@ export function installEngine(): void {
           .replaceMediaAsset(item.id, new File([res.body], item.name, { type }));
         if (!relinked.success) throw new Error(`Relink ${item.name}: ${relinked.error?.message ?? "failed"}`);
       }
-    },
-    frames: async (times, long = 480) => {
-      const { project } = useProjectStore.getState();
-      const video = useEngineStore.getState().getVideoEngine();
-      if (!video) throw new Error("The video engine is not ready");
-      await ensureProjectFonts(project);
-      const { width, height } = project.settings;
-      const scale = long / Math.max(width, height);
-      const w = Math.round(width * scale);
-      const h = Math.round(height * scale);
-      const columns = Math.min(times.length, Math.ceil(Math.sqrt(times.length * (height >= width ? 2 : 1))));
-      const rows = Math.ceil(times.length / columns);
-      const sheet = new OffscreenCanvas(columns * w, rows * h);
-      const ctx = sheet.getContext("2d")!;
-      for (const [at, time] of times.entries()) {
-        const { image } = await video.renderFrame(project, time, w, h);
-        const x = (at % columns) * w;
-        const y = Math.floor(at / columns) * h;
-        ctx.drawImage(image, x, y, w, h);
-        image.close();
-        ctx.font = "bold 16px sans-serif";
-        const label = `${time.toFixed(2)} s`;
-        ctx.fillStyle = "#000";
-        ctx.fillRect(x, y, ctx.measureText(label).width + 8, 22);
-        ctx.fillStyle = "#fff";
-        ctx.fillText(label, x + 4, y + 16);
-      }
-      const bytes = new Uint8Array(await (await sheet.convertToBlob({ type: "image/jpeg", quality: 0.85 })).arrayBuffer());
-      let binary = "";
-      for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-      return { jpeg: btoa(binary), columns, rows };
     },
     exported: async () => {
       const { id, blob } = exportedBlob();
