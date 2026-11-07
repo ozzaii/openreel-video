@@ -129,6 +129,8 @@ export class VideoEngine {
   private frameCache: Map<string, CachedFrame> = new Map();
   private gifFrameCache: Map<string, GifFrameCache> = new Map();
   private staticImageCache: Map<string, ImageBitmap> = new Map();
+  /** The project frame the kept stills were sized for: another format decodes them again (`decodeStill`). */
+  private stillFrame = { width: 1920, height: 1920 };
   private cacheConfig: FrameCacheConfig;
   private cacheStats = { hits: 0, misses: 0 };
   private preloadQueue: PreloadRequest[] = [];
@@ -649,6 +651,11 @@ export class VideoEngine {
     const width = targetWidth ?? settings.width;
     const height = targetHeight ?? settings.height;
 
+    if (this.stillFrame.width !== settings.width || this.stillFrame.height !== settings.height) {
+      this.stillFrame = { width: settings.width, height: settings.height };
+      this.staticImageCache.clear();
+    }
+
     const scaleX = width / settings.width;
     const scaleY = height / settings.height;
 
@@ -844,7 +851,7 @@ export class VideoEngine {
                   bitmap = cached;
                   bitmapFromCache = true;
                 } else {
-                  bitmap = await createImageBitmap(mediaItem.blob);
+                  bitmap = await this.decodeStill(mediaItem.blob);
                   this.staticImageCache.set(mediaItem.id, bitmap);
                   bitmapFromCache = true;
                 }
@@ -1517,7 +1524,7 @@ export class VideoEngine {
           frame = cached;
         } else {
           try {
-            frame = await createImageBitmap(mediaItem.blob);
+            frame = await this.decodeStill(mediaItem.blob);
             this.staticImageCache.set(mediaItem.id, frame);
           } catch {
             frame = null;
@@ -2173,7 +2180,7 @@ export class VideoEngine {
         }
         const cached = this.staticImageCache.get(mediaItem.id);
         if (cached) return cached;
-        const bitmap = await createImageBitmap(mediaItem.blob);
+        const bitmap = await this.decodeStill(mediaItem.blob);
         this.staticImageCache.set(mediaItem.id, bitmap);
         return bitmap;
       } catch (error) {
@@ -2320,6 +2327,23 @@ export class VideoEngine {
     }
 
     return rendered;
+  }
+
+  /**
+   * A still is kept at one and a half times what covers the project's frame: a 24 MP photo ran every per-pixel
+   * effect and keyframed draw at 24 MP, each frame of an export. The margin keeps a push-in or a crop sharp.
+   */
+  private async decodeStill(blob: Blob): Promise<ImageBitmap> {
+    const whole = await createImageBitmap(blob);
+    const ratio = 1.5 * Math.max(this.stillFrame.width / whole.width, this.stillFrame.height / whole.height);
+    if (ratio >= 1) return whole;
+    const small = await createImageBitmap(whole, {
+      resizeWidth: Math.round(whole.width * ratio),
+      resizeHeight: Math.round(whole.height * ratio),
+      resizeQuality: "high",
+    });
+    whole.close();
+    return small;
   }
 
   private createClipRenderInfo(clip: Clip, time: number): VideoClipRenderInfo {
