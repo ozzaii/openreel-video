@@ -403,6 +403,9 @@ export class VideoEffectsEngine {
   private useNewRenderer = false;
 
   // Reusable CPU-effects canvas (FX3): avoids per-frame OffscreenCanvas allocation
+  private _vignetteKey: string | null = null;
+  private _vignetteMask: Float32Array | null = null;
+  private _grainNoise: Int8Array | null = null;
   private _fxCanvas: OffscreenCanvas | null = null;
   private _fxCtx: OffscreenCanvasRenderingContext2D | null = null;
   private _fxScratchCanvas: OffscreenCanvas | null = null;
@@ -1340,7 +1343,7 @@ export class VideoEffectsEngine {
     height: number,
     amount: number,
   ): void {
-    const normalizedAmount = amount / 100;
+    const normalizedAmount = amount;
     const copy = new Uint8ClampedArray(data);
     const kernel = [
       0,
@@ -1378,28 +1381,32 @@ export class VideoEffectsEngine {
     midpoint: number,
     feather: number,
   ): void {
-    const normalizedAmount = amount / 100;
-    const centerX = width / 2;
-    const centerY = height / 2;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const dx = (x - centerX) / centerX;
-        const dy = (y - centerY) / centerY;
-        const dist = Math.sqrt(dx * dx + dy * dy) / Math.SQRT2;
-
-        const vignette = this.smoothstep(
-          midpoint - feather,
-          midpoint + feather,
-          dist,
-        );
-        const factor = 1 - vignette * normalizedAmount;
-
-        const idx = (y * width + x) * 4;
-        data[idx] = Math.round(data[idx] * factor);
-        data[idx + 1] = Math.round(data[idx + 1] * factor);
-        data[idx + 2] = Math.round(data[idx + 2] * factor);
+    // The mask is the same for every frame of a size: computed once, an export's frames only multiply.
+    const key = `${width}x${height}:${midpoint}:${feather}`;
+    if (this._vignetteKey !== key || !this._vignetteMask) {
+      const mask = new Float32Array(width * height);
+      const centerX = width / 2;
+      const centerY = height / 2;
+      for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+          const dx = (x - centerX) / centerX;
+          const dy = (y - centerY) / centerY;
+          mask[y * width + x] = this.smoothstep(
+            midpoint - feather,
+            midpoint + feather,
+            Math.sqrt(dx * dx + dy * dy) / Math.SQRT2,
+          );
+        }
       }
+      this._vignetteMask = mask;
+      this._vignetteKey = key;
+    }
+    const mask = this._vignetteMask;
+    for (let i = 0, idx = 0; i < mask.length; i++, idx += 4) {
+      const factor = 1 - mask[i]! * amount;
+      data[idx] = data[idx]! * factor;
+      data[idx + 1] = data[idx + 1]! * factor;
+      data[idx + 2] = data[idx + 2]! * factor;
     }
   }
 
@@ -1409,13 +1416,16 @@ export class VideoEffectsEngine {
   }
 
   private applyGrain(data: Uint8ClampedArray, amount: number): void {
-    const normalizedAmount = amount / 100;
-    const intensity = normalizedAmount * 50;
+    const intensity = (amount * 50) / 254;
+    // One frame's worth of noise, read from a new place each frame: Math.random per pixel was most of a graded frame.
+    const noise = (this._grainNoise ??= Int8Array.from({ length: 1 << 22 }, () => Math.random() * 254 - 127));
+    const wrap = noise.length - 1;
+    let at = Math.floor(Math.random() * noise.length);
     for (let i = 0; i < data.length; i += 4) {
-      const noise = (Math.random() - 0.5) * intensity;
-      data[i] = Math.max(0, Math.min(255, data[i] + noise));
-      data[i + 1] = Math.max(0, Math.min(255, data[i + 1] + noise));
-      data[i + 2] = Math.max(0, Math.min(255, data[i + 2] + noise));
+      const grain = noise[at++ & wrap]! * intensity;
+      data[i] = data[i]! + grain;
+      data[i + 1] = data[i + 1]! + grain;
+      data[i + 2] = data[i + 2]! + grain;
     }
   }
 
@@ -1714,7 +1724,8 @@ export class VideoEffectsEngine {
 
     switch (effect.type) {
       case "brightness":
-        return `brightness(${1 + value / 100})`;
+        // shortcut: the agent's schema and presets write -1..1, one UI preset writes 12 meaning percent; a whole-range rewrite waits for upstream.
+        return `brightness(${1 + (Math.abs(value) > 1 ? value / 100 : value)})`;
       case "contrast":
         return `contrast(${readEffectNumber(params.value, 1)})`;
       case "saturation":
