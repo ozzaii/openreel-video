@@ -43,7 +43,7 @@ import {
   MOTION_ANIMATABLE_PROPERTIES,
   type MotionAnimatableProperty,
 } from "@openreel/core/motion/motion-keyframes";
-import { getMotionPreset } from "@openreel/core/motion/motion-presets";
+import { getMotionPreset, MOTION_PRESETS } from "@openreel/core/motion/motion-presets";
 import {
   createMotionVariable,
   updateMotionCompositionVariable,
@@ -22847,7 +22847,7 @@ const TOOLS: RegisteredTool[] = [
     domain: "motion",
     title: "Apply motion template",
     description:
-      "Create a new Motion Creator composition from a built-in motion template/preset.",
+      `Create a new Motion Creator composition from a built-in motion template/preset (templateId: ${MOTION_PRESETS.map((preset) => preset.id).join(", ")}).`,
     inputSchema: obj({ templateId: str, name: str }, ["templateId"]),
     readOnly: false,
     destructive: false,
@@ -32147,9 +32147,13 @@ const TOOLS: RegisteredTool[] = [
     "export_video",
     "export",
     "Export video",
-    "Render the whole project to a local video file (format: mp4|webm|mov, default mp4) and return its local result metadata. Expensive — requires confirmation.",
+    "Render the whole project to a local video file (format: mp4|webm|mov, default mp4) and return its local result metadata. bitrate is the video's kbps (default 12000, VBR); quality 1-100 (default 85) is the native encoder's, the web encoder follows bitrate. Expensive — requires confirmation.",
     "exportVideo",
-    obj({ format: str }),
+    obj({
+      format: str,
+      bitrate: { type: "number", minimum: 500, maximum: 200000 },
+      quality: { type: "number", minimum: 1, maximum: 100 },
+    }),
   ),
   jobTool(
     "export_audio",

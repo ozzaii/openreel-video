@@ -1,6 +1,6 @@
 // Engine boot mode (#engine=<project key>): the editor without its screens, driven by a host
 // through OpenReel's own dispatchers: their current chat's curated catalog (editing-tools.ts, on an
-// atomic EditingSession per call) and, past it, the registry the desktop MCP bridge forwards to.
+// atomic EditingSession per call) and every other registry tool, through the desktop MCP bridge's dispatcher.
 import { toAnthropicTools, type ToolResult } from "@openreel/agent";
 import { createProjectSerializer, createStorageEngine } from "@openreel/core";
 import { handleMcpBridgeRequest, type McpBridgeRequest } from "./services/agent/mcp-listener";
@@ -13,6 +13,7 @@ import { useEngineStore } from "./stores/engine-store";
 import { useProjectStore } from "./stores/project-store";
 import { ensureProjectFonts } from "./services/project-fonts";
 import { FONT_CATEGORIES } from "./components/editor/inspector/font-options";
+import { PORTABLE_VIDEO_EFFECTS } from "@openreel/core/editing/portable-project";
 
 export interface Engine {
   readonly ready: Promise<void>;
@@ -39,16 +40,53 @@ async function dispatch(req: Omit<McpBridgeRequest, "callId">): Promise<unknown>
 }
 
 /**
- * Past their chat's catalog, from the registry: media by link and a real export (the chat only opens
- * the export dialog and imports by hand), and an SRT in one call (the chat adds a subtitle at a time).
+ * THE WHOLE STUDIO, ONE FIXED LIST: every registry tool, and their chat's curated tools (editing-tools.ts) in
+ * place of the registry's where a name is both, as `call` runs them there. Sorted by name and built from module
+ * constants, so it is the same bytes on every page: a host's static prefix, with no router changing it per brief.
  */
-const FROM_REGISTRY = ["import_media_from_url", "export_video", "import_srt"];
+const DRAFTED = "Tools operate on an isolated draft and the whole turn commits atomically.";
+const REFUSED = "No network media downloads, arbitrary scripts, custom shaders, automatic transcription or generative media tools are available here. ";
+
+/**
+ * Video effects past their chat's eight numeric ones (a shader, glow, chromatic aberration): the registry's
+ * add/update_video_effect take them, and `call` sends such an effect there. The catalog carries the registry's
+ * entry with their chat's parameter ranges beside it.
+ */
+const WIDER = new Set(["add_video_effect", "update_video_effect"]);
+const portable = (name: string, args: Record<string, unknown>): boolean => {
+  const type =
+    name === "add_video_effect"
+      ? args.effectType
+      : useProjectStore
+          .getState()
+          .project.timeline.tracks.flatMap((track) => track.clips)
+          .find((clip) => clip.id === args.clipId)
+          ?.effects.find((effect) => effect.id === args.effectId)?.type;
+  return (PORTABLE_VIDEO_EFFECTS as readonly unknown[]).includes(type);
+};
+const chatRuns = (name: string, args: Record<string, unknown>): boolean =>
+  name in EDIT_TOOL_SCHEMAS && (!WIDER.has(name) || portable(name, args));
 
 export function catalog(): { system: string; tools: unknown[] } {
-  const chat = (editingToolDefs("anthropic") as Array<{ name: string }>).filter((t) => t.name !== "open_export");
+  const chat = (editingToolDefs("anthropic") as Array<{ name: string; description: string }>).filter(
+    (t) => t.name !== "open_export",
+  );
+  const curated = new Set(chat.filter((t) => !WIDER.has(t.name)).map((t) => t.name));
+  const registry = toAnthropicTools().map((t) =>
+    WIDER.has(t.name)
+      ? { ...t, description: `${t.description} ${chat.find((c) => c.name === t.name)?.description ?? ""}`.trim() }
+      : t,
+  );
+  const tools = [...chat.filter((t) => curated.has(t.name)), ...registry.filter((t) => !curated.has(t.name))].sort((a, b) =>
+    a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
+  );
   // The families the page itself holds (public/fonts): a text clip's fontFamily is one of these, or it falls back.
   const fonts = [...new Set(Object.values(FONT_CATEGORIES).flat())].join(", ");
-  return { system: `${EDITING_SYSTEM}\n\nFonts this editor holds: ${fonts}.`, tools: [...chat, ...toAnthropicTools(FROM_REGISTRY)] };
+  const system = EDITING_SYSTEM.replace(REFUSED, "").replace(
+    DRAFTED,
+    `Their chat's curated tools (${[...curated].sort().join(", ")}) operate on an isolated draft committed whole per call; every other tool is the registry's and applies directly.`,
+  );
+  return { system: `${system}\n\nFonts this editor holds: ${fonts}.`, tools };
 }
 
 /** One catalog call as their chat runs a turn (chat-store.ts): validated on a draft, committed whole or not at all. */
@@ -118,7 +156,7 @@ export function installEngine(): void {
     call: async (name, args = {}) =>
       name === "see_frames"
         ? seeFrames(args as { times: number[]; long?: number })
-        : name in EDIT_TOOL_SCHEMAS
+        : chatRuns(name, args)
         ? runExclusive(() => edit(name, args))
         : ((await dispatch({ kind: "callTool", name, args })) as ToolResult),
     save: async () => serializer().exportToJson(useProjectStore.getState().getFullProject()),
