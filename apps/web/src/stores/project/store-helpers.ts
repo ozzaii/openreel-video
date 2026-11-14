@@ -242,6 +242,12 @@ export function createProjectStoreHelpers(
         const sourceSpan = c.outPoint - c.inPoint;
         speedEngine.setClipSpeed(c.id, c.speed ?? 1, sourceSpan);
         speedEngine.setReverse(c.id, c.reversed ?? false, sourceSpan);
+        // A ramp and its freezes are the clip's (speed/setRampData); the renderer reads them off the engine.
+        const data = speedEngine.getClipSpeedData(c.id);
+        if (data) {
+          data.keyframes = [...(c.speedKeyframes ?? [])];
+          data.freezeFrames = [...(c.freezeFrames ?? [])];
+        }
       }
     }
     const chromaClips = project.timeline.tracks

@@ -1783,6 +1783,8 @@ export const useProjectStore = create<ProjectState>()(
 
         syncProjectEffectsBridge(fixedProject, previousProject);
         syncProjectTransitionsBridge(fixedProject, previousProject);
+        // Speeds, ramps and freezes of a project opened from its JSON (a host's load) reach the renderer.
+        syncOverlayEnginesFromProject(fixedProject);
 
         registerProjectGeneratedShaders(fixedProject);
 
@@ -2954,6 +2956,8 @@ export const useProjectStore = create<ProjectState>()(
         const previousProject = action.type === "project/applyEditSnapshot" ? { ...targetProject } : undefined;
         const result = await actionExecutor.execute(action, targetProject);
         if (result.success) {
+          // A speed action from a host (the registry's set_speed_ramp) reaches the renderer's speed engine too.
+          if (action.type.startsWith("speed/")) syncOverlayEnginesFromProject(targetProject);
           if (action.type === "project/applyEditSnapshot") {
             syncOverlayEnginesFromProject(targetProject);
             syncProjectEffectsBridge(targetProject, previousProject);

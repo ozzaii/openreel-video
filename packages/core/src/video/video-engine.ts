@@ -1096,7 +1096,7 @@ export class VideoEngine {
     this.renderParticlesToContext(ctx, time, width, height);
 
     for (const subtitle of activeSubtitles) {
-      this.renderSubtitleToCanvasCtx(ctx, subtitle, width, height);
+      this.renderSubtitleToCanvasCtx(ctx, subtitle, width, height, scaleY);
     }
 
     await this.applyAdjustmentLayersToComposite(
@@ -2032,13 +2032,15 @@ export class VideoEngine {
     subtitle: Subtitle,
     canvasWidth: number,
     canvasHeight: number,
+    // A style's pixels are the project's: a frame drawn smaller (a host's frame sheet) draws them smaller.
+    scale = 1,
   ): void {
     const { text, style } = subtitle;
     if (!text || text.trim().length === 0) return;
 
     ctx.save();
 
-    const fontSize = style?.fontSize || 24;
+    const fontSize = (style?.fontSize || 24) * scale;
     const fontFamily = style?.fontFamily || "Inter";
     const color = style?.color || "#ffffff";
     const backgroundColor = style?.backgroundColor || "rgba(0, 0, 0, 0.7)";
@@ -2067,7 +2069,7 @@ export class VideoEngine {
 
       const y = baseY + i * lineHeight + lineHeight / 2;
       const metrics = ctx.measureText(line);
-      const bgWidth = metrics.width + 20;
+      const bgWidth = metrics.width + 20 * scale;
       const bgHeight = lineHeight;
 
       ctx.fillStyle = backgroundColor;

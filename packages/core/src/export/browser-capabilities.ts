@@ -21,6 +21,8 @@ export function getVideoExportValidationError(settings: VideoExportSettings, dur
 export function getMissingExportMedia(project: Project, range?: VideoExportSettings["range"]): string[] {
   const referenced = new Set(project.timeline.tracks.flatMap((track) => track.clips
     .filter((clip) => !range || (clip.startTime < range.endTime && clip.startTime + clip.duration > range.startTime))
+    // A motion scene's clip has no media: the renderer draws its instance (createMotionClip, motion-engine.ts).
+    .filter((clip) => !clip.metadata?.motionInstanceId)
     .map((clip) => clip.mediaId)));
   return [...referenced].flatMap((id) => {
     const item = project.mediaLibrary.items.find((candidate) => candidate.id === id);

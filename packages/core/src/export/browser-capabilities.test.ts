@@ -48,4 +48,8 @@ describe("browser export preflight", () => {
     expect(getMissingExportMedia(project, { startTime: 2, endTime: 4 })).toEqual([]);
     expect(getMissingExportMedia(project, { startTime: 1, endTime: 4 })).toEqual(["Missing.mp4"]);
   });
+  it("needs no media for a motion scene the renderer draws itself", () => {
+    const project = { timeline: { tracks: [{ clips: [{ mediaId: "motion-i1", startTime: 0, duration: 2, metadata: { motionInstanceId: "i1" } }] }] }, mediaLibrary: { items: [] } } as unknown as Project;
+    expect(getMissingExportMedia(project)).toEqual([]);
+  });
 });
