@@ -28,9 +28,13 @@ const AUDIO_MIME: Record<string, string> = {
   ogg: "audio/ogg",
 };
 
+const given = (value: unknown, min: number, max: number, fallback: number): number =>
+  typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : fallback;
+
 function videoSettings(
   format: string,
   project: Project,
+  params: Record<string, unknown> = {},
 ): Partial<VideoExportSettings> {
   const fmt = (VIDEO_FORMATS.has(format as VideoExportSettings["format"])
     ? format
@@ -42,10 +46,12 @@ function videoSettings(
     width: project.settings.width,
     height: project.settings.height,
     frameRate: project.settings.frameRate,
-    bitrate: 12000,
+    bitrate: given(params.bitrate, 500, 200000, 12000),
     bitrateMode: "vbr",
-    quality: 85,
+    quality: given(params.quality, 1, 100, 85),
     keyframeInterval: 2,
+    // A host finishes the file at AAC 320k 48 kHz: the page's own track should not be the weaker encode.
+    audioSettings: { format: "aac", sampleRate: 48000, bitDepth: 16, bitrate: 320, channels: 2 },
   };
 }
 
@@ -204,7 +210,7 @@ export function createExportJobRunner(): JobRunner {
       if (kind === "exportVideo") {
         const format = typeof params.format === "string" ? params.format : "mp4";
         const ext = VIDEO_FORMATS.has(format as VideoExportSettings["format"]) ? format : "mp4";
-        const settings = videoSettings(format, project);
+        const settings = videoSettings(format, project, params);
         const videoCodec = settings.codec === "h265" ? "hevc" : "avc";
         setEncoderBackendFactory((mediabunny) =>
           mediabunny
