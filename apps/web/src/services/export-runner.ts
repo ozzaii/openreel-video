@@ -122,7 +122,14 @@ export function progressPhaseLabel(phase: string): string {
   return phase === "complete" ? "Complete!" : `${phase}...`;
 }
 
+/** Where else a finished download goes: a host's door (`door.ts`) takes each export into its own project. */
+let exportSink: ((file: Blob, name: string) => void) | undefined;
+export const sendExportsTo = (sink: typeof exportSink): void => {
+  exportSink = sink;
+};
+
 function triggerAnchorDownload(data: Blob, filename: string, onRelease?: () => void): void {
+  exportSink?.(data, filename);
   const url = URL.createObjectURL(data);
   const anchor = document.createElement("a");
   let released = false;

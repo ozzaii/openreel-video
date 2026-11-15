@@ -10,6 +10,7 @@ import { useProjectRecovery } from "./hooks/useProjectRecovery";
 import { useKieAIPoller } from "./hooks/useKieAIPoller";
 import { SOCIAL_MEDIA_PRESETS, type SocialMediaCategory } from "@openreel/core";
 import { ToolcraftText as Text } from "@openreel/ui";
+import { doorOf, keepSaving, openDoor, type DoorState } from "./door";
 
 const EditorInterface = lazy(() =>
   import("./components/editor/EditorInterface").then((m) => ({
@@ -32,6 +33,13 @@ const LoadingSpinner: React.FC<{ message: string }> = ({ message }) => (
   </div>
 );
 
+const DOOR_WORDS: Record<Exclude<DoorState, "opening">, string> = {
+  saved: "Saved to BRAVOH",
+  saving: "Saving to BRAVOH…",
+  busy: "BRAVOH is cutting this video. Your change goes as soon as it finishes.",
+  failed: "Not saved to BRAVOH yet. Trying again…",
+};
+
 const PRESET_DIMENSIONS: Record<string, SocialMediaCategory> = {
   "1080x1920": "tiktok",
   "1920x1080": "youtube-video",
@@ -52,6 +60,10 @@ function App() {
   const { isChecking, showDialog, availableSaves, recover, dismiss, clearAll } = useProjectRecovery();
 
   const { route, params, navigate, parsedDimensions, fps } = useRouter();
+  // Read once: the router's own navigation rewrites the hash without it.
+  const [door] = useState(() => doorOf(window.location.hash));
+  const [doorState, setDoorState] = useState<DoorState | undefined>(door ? "opening" : undefined);
+  const [doorError, setDoorError] = useState<string | undefined>();
   const hasHandledInitialRoute = useRef(false);
   useKieAIPoller();
   const showWelcome =
@@ -124,11 +136,28 @@ function App() {
   ]);
 
   useEffect(() => {
+    if (!door) return;
+    let stop: (() => void) | undefined;
+    let left = false;
+    openDoor(door)
+      .then(() => {
+        if (left) return;
+        setDoorState("saved");
+        stop = keepSaving(door, setDoorState);
+      })
+      .catch((error: unknown) => setDoorError(error instanceof Error ? error.message : String(error)));
+    return () => {
+      left = true;
+      stop?.();
+    };
+  }, [door]);
+
+  useEffect(() => {
     // Recovery owns the choice until it settles. A bare editor URL still needs
     // a real project for autosave and preview-proxy lifecycle subscriptions.
-    if (showWelcome || isSharePage || route === "new" || isChecking || showDialog || isRecovering || hasOpenProject) return;
+    if (door || showWelcome || isSharePage || route === "new" || isChecking || showDialog || isRecovering || hasOpenProject) return;
     createNewProject("New Project");
-  }, [showWelcome, isSharePage, route, isChecking, showDialog, isRecovering, hasOpenProject, createNewProject]);
+  }, [door, showWelcome, isSharePage, route, isChecking, showDialog, isRecovering, hasOpenProject, createNewProject]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
@@ -158,25 +187,34 @@ function App() {
   return (
     <div className="h-screen h-[100dvh] w-screen bg-background text-text-primary overflow-hidden">
       <MobileBlocker />
-      {isSharePage ? (
+      {doorError ? (
+        <div role="alert" className="h-full flex items-center justify-center p-6 text-center">
+          <Text type="body" display="block">This video did not open: {doorError.replace(/\.+$/, "")}. Close this tab and press Open in editor again.</Text>
+        </div>
+      ) : isSharePage ? (
         <Suspense fallback={<LoadingSpinner message="Loading shared video..." />}>
           <SharePage shareId={params.shareId!} />
         </Suspense>
-      ) : showWelcome ? (
+      ) : showWelcome && !door ? (
         <WelcomeScreen initialTab={initialTab} />
-      ) : !hasOpenProject || route === "new" ? (
+      ) : !hasOpenProject || route === "new" || doorState === "opening" ? (
         <LoadingSpinner message={isChecking ? "Checking for saved projects..." : showDialog ? "Choose a saved project or start fresh..." : "Opening project..."} />
       ) : (
         <Suspense fallback={<LoadingSpinner message="Loading editor..." />}>
           <EditorInterface />
         </Suspense>
       )}
+      {doorState && doorState !== "opening" && !doorError ? (
+        <div role="status" className="fixed bottom-3 left-3 max-sm:bottom-20 z-50 rounded-full bg-bg-1/90 border border-border px-3 py-1 text-xs text-fg-2 pointer-events-none">
+          {DOOR_WORDS[doorState]}
+        </div>
+      ) : null}
       <ToastContainer />
       <Suspense fallback={null}>
         {(hasOpenedScriptView || activeModal === "scriptView") && <ScriptViewDialog isOpen={activeModal === "scriptView"} onClose={closeModal} />}
         {activeModal === "search" && <SearchModal isOpen onClose={closeModal} />}
       </Suspense>
-      {showDialog && availableSaves.length > 0 && (
+      {!door && showDialog && availableSaves.length > 0 && (
         <RecoveryDialog
           saves={availableSaves}
           onRecover={async (saveId) => {

@@ -2,13 +2,12 @@
 // through OpenReel's own dispatchers: their current chat's curated catalog (editing-tools.ts, on an
 // atomic EditingSession per call) and every other registry tool, through the desktop MCP bridge's dispatcher.
 import { toAnthropicTools, type ToolResult } from "@openreel/agent";
-import { createProjectSerializer, createStorageEngine } from "@openreel/core";
 import { handleMcpBridgeRequest, type McpBridgeRequest } from "./services/agent/mcp-listener";
 import { getLiveEditorHost, runExclusive } from "./services/agent/host-singleton";
 import { EditingSession } from "./services/agent/editing-session";
 import { EDIT_TOOL_SCHEMAS, EDITING_SYSTEM, editingToolDefs, executeEditingTool } from "./services/agent/editing-tools";
 import { createExportJobRunner, getLastExport } from "./services/agent/export-job-runner";
-import { fetchInPage } from "./services/agent/live-host";
+import { openSaved, serializer } from "./services/open-saved";
 import { useEngineStore } from "./stores/engine-store";
 import { useProjectStore } from "./stores/project-store";
 import { ensureProjectFonts } from "./services/project-fonts";
@@ -99,8 +98,6 @@ export async function edit(name: string, args: Record<string, unknown>): Promise
   return result;
 }
 
-const serializer = () => createProjectSerializer(createStorageEngine());
-
 function exportedBlob(id?: string): { id: string; blob: Blob } {
   const last = getLastExport();
   if (!last) throw new Error("Nothing has been exported yet");
@@ -160,21 +157,7 @@ export function installEngine(): void {
         ? runExclusive(() => edit(name, args))
         : ((await dispatch({ kind: "callTool", name, args })) as ToolResult),
     save: async () => serializer().exportToJson(useProjectStore.getState().getFullProject()),
-    load: async (json) => {
-      const project = serializer().importFromJson(json);
-      useProjectStore.getState().loadProject(project);
-      // Relink: a project saved elsewhere carries no media bytes, only the links they came from.
-      for (const item of project.mediaLibrary.items) {
-        if (!item.isPlaceholder || !item.originalUrl || !/^https?:/i.test(item.originalUrl)) continue;
-        const res = await fetchInPage(item.originalUrl);
-        if (!res.ok) throw new Error(`Relink ${item.name}: ${res.error ?? `HTTP ${res.status}`}`);
-        const type = (res.contentType.split(";")[0] ?? "").trim();
-        const relinked = await useProjectStore
-          .getState()
-          .replaceMediaAsset(item.id, new File([res.body], item.name, { type }));
-        if (!relinked.success) throw new Error(`Relink ${item.name}: ${relinked.error?.message ?? "failed"}`);
-      }
-    },
+    load: openSaved,
     exported: async () => {
       const { id, blob } = exportedBlob();
       return { id, bytes: blob.size, type: blob.type };

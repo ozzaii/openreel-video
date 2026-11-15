@@ -256,6 +256,7 @@ export function createMediaSlice(set: Set, get: Get): MediaSlice {
       mediaId: string,
       file: File,
       sourceFolder?: string,
+      options?: { persist?: boolean },
     ) => {
       const { project } = get();
       const replacementKey = `${project.id}:${mediaId}`;
@@ -404,12 +405,15 @@ export function createMediaSlice(set: Set, get: Get): MediaSlice {
         });
 
         try {
-          await saveMediaBlob(
-            currentProject.id,
-            updatedItem.id,
-            file,
-            updatedItem.metadata,
-          );
+          // A project opened from a host relinks from the host on every open (`open-saved.ts`): a second copy of
+          // the footage in browser storage would only cost the artist's disk.
+          if (options?.persist !== false)
+            await saveMediaBlob(
+              currentProject.id,
+              updatedItem.id,
+              file,
+              updatedItem.metadata,
+            );
         } catch (error) {
           console.error("[ProjectStore] Failed to persist replacement media:", error);
           toast.warning(
